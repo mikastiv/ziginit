@@ -68,20 +68,42 @@ pub fn main() !void {
         }
     }
 
-    const project_name = pname orelse fatal(error.MissingArgument);
+    var project_name: std.ArrayList(u8) = .empty;
+    if (pname) |name|
+        try project_name.appendSlice(allocator, name)
+    else
+        fatal(error.MissingArgument);
 
-    try std.fs.cwd().makeDir(project_name);
+    std.mem.replaceScalar(u8, project_name.items, '-', '_');
+    std.mem.replaceScalar(u8, project_name.items, ' ', '_');
+
+    var i: usize = 0;
+    while (i < project_name.items.len) {
+        project_name.items[i] = std.ascii.toLower(project_name.items[i]);
+        if (!std.ascii.isAlphanumeric(project_name.items[i]) and project_name.items[i] != '_') {
+            _ = project_name.swapRemove(i);
+            continue;
+        }
+
+        i += 1;
+    }
+
+    if (std.ascii.isDigit(project_name.items[0])) {
+        try project_name.insert(allocator, 0, '_');
+    }
+
+    try std.fs.cwd().makeDir(project_name.items);
 
     const fingerprint: Fingerprint = .{
         .id = std.crypto.random.intRangeLessThan(u32, 1, 0xffffffff),
-        .checksum = std.hash.Crc32.hash(project_name),
+        .checksum = std.hash.Crc32.hash(project_name.items),
     };
 
-    const project_dir = try std.fs.cwd().openDir(project_name, .{});
+    const project_dir = try std.fs.cwd().openDir(project_name.items, .{});
     try project_dir.makeDir("src");
 
-    try writeFile(project_dir, "build.zig", build_zig, .{project_name});
-    try writeFile(project_dir, "build.zig.zon", build_zig_zon, .{ project_name, fingerprint.int(), zig_version });
+    try writeFile(project_dir, "build.zig", build_zig, .{project_name.items});
+    try writeFile(project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version });
     try writeFile(project_dir, "src/main.zig", main_zig, .{});
     if (is_flake_package) {
         try writeFile(project_dir, "flake.nix", flake_package, .{zig_version});
