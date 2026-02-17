@@ -28,7 +28,7 @@ const usage =
 ;
 
 fn fatal(err: anyerror) noreturn {
-    std.process.fatal("{t}\n", .{err});
+    std.process.fatal("{t}", .{err});
 }
 
 pub fn cutPrefix(comptime T: type, slice: []const T, prefix: []const T) ?[]const T {
@@ -49,7 +49,7 @@ pub fn main() !void {
 
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "-")) {
-            if (std.mem.eql(u8, arg, "--help")) {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
                 try stderr.writeAll(usage);
                 try stderr.flush();
                 return;
