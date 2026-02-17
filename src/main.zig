@@ -21,9 +21,9 @@ const usage =
     \\usage: ziginit [options] <project name>
     \\
     \\options:
-    \\  --help
-    \\  --flake-package
-    \\  --zig-version=[version]
+    \\  -h, --help                 print help text
+    \\  --flake-package            initialize the flake as a package also
+    \\  --zig-version=[version]    set the zig compiler version
     \\
 ;
 
