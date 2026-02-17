@@ -92,14 +92,14 @@ pub fn main() !void {
         try project_name.insert(allocator, 0, '_');
     }
 
-    try std.fs.cwd().makeDir(project_name.items);
+    try std.fs.cwd().makeDir(pname.?);
 
     const fingerprint: Fingerprint = .{
         .id = std.crypto.random.intRangeLessThan(u32, 1, 0xffffffff),
         .checksum = std.hash.Crc32.hash(project_name.items),
     };
 
-    const project_dir = try std.fs.cwd().openDir(project_name.items, .{});
+    const project_dir = try std.fs.cwd().openDir(pname.?, .{});
     try project_dir.makeDir("src");
 
     try writeFile(project_dir, "build.zig", build_zig, .{project_name.items});
