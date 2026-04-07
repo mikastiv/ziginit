@@ -190,9 +190,17 @@ const flake =
     \\
     \\  inputs = {{
     \\    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    \\    zig.url = "github:mitchellh/zig-overlay";
-    \\    zls.url = "github:zigtools/zls";
     \\    flake-utils.url = "github:numtide/flake-utils";
+    \\
+    \\    zig = {{
+    \\      url = "github:mitchellh/zig-overlay";
+    \\      inputs.nixpkgs.follows = "nixpkgs";
+    \\    }};
+    \\
+    \\    zls = {{
+    \\      url = "github:zigtools/zls";
+    \\      inputs.nixpkgs.follows = "nixpkgs";
+    \\    }};
     \\  }};
     \\
     \\  outputs = {{ self, nixpkgs, zig, zls, flake-utils }}:
@@ -217,9 +225,17 @@ const flake_package =
     \\
     \\  inputs = {{
     \\    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    \\    zig.url = "github:mitchellh/zig-overlay";
-    \\    zls.url = "github:zigtools/zls";
     \\    flake-utils.url = "github:numtide/flake-utils";
+    \\
+    \\    zig = {{
+    \\      url = "github:mitchellh/zig-overlay";
+    \\      inputs.nixpkgs.follows = "nixpkgs";
+    \\    }};
+    \\
+    \\    zls = {{
+    \\      url = "github:zigtools/zls";
+    \\      inputs.nixpkgs.follows = "nixpkgs";
+    \\    }};
     \\  }};
     \\
     \\  outputs =
