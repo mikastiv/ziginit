@@ -1,13 +1,5 @@
 const std = @import("std");
 
-var stderr_buffer: [1024]u8 = undefined;
-var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-const stderr = &stderr_writer.interface;
-
-var stdout_buffer: [1024]u8 = undefined;
-var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-const stdout = &stdout_writer.interface;
-
 const Fingerprint = packed struct(u64) {
     id: u32,
     checksum: u32,
@@ -31,17 +23,15 @@ fn fatal(err: anyerror) noreturn {
     std.process.fatal("{t}", .{err});
 }
 
-pub fn cutPrefix(comptime T: type, slice: []const T, prefix: []const T) ?[]const T {
-    return if (std.mem.startsWith(T, slice, prefix)) slice[prefix.len..] else null;
-}
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
+    const io = init.io;
 
-pub fn main() !void {
-    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-    defer arena.deinit();
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buffer);
+    const stderr = &stderr_writer.interface;
 
-    const allocator = arena.allocator();
-
-    const args = (try std.process.argsAlloc(allocator))[1..];
+    const args = (try init.minimal.args.toSlice(allocator))[1..];
 
     var pname: ?[]const u8 = null;
     var zig_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 2 };
@@ -55,7 +45,7 @@ pub fn main() !void {
                 return;
             } else if (std.mem.eql(u8, arg, "--flake-package")) {
                 is_flake_package = true;
-            } else if (cutPrefix(u8, arg, "--zig-version=")) |version| {
+            } else if (std.mem.cutPrefix(u8, arg, "--zig-version=")) |version| {
                 zig_version = try .parse(version);
             } else {
                 fatal(error.InvalidOption);
@@ -92,34 +82,37 @@ pub fn main() !void {
         try project_name.insert(allocator, 0, '_');
     }
 
-    try std.fs.cwd().makeDir(pname.?);
+    try std.Io.Dir.cwd().createDir(io, pname.?, .default_file);
+
+    const rng_impl: std.Random.IoSource = .{ .io = io };
+    const rng = rng_impl.interface();
 
     const fingerprint: Fingerprint = .{
-        .id = std.crypto.random.intRangeLessThan(u32, 1, 0xffffffff),
+        .id = rng.intRangeLessThan(u32, 1, 0xffffffff),
         .checksum = std.hash.Crc32.hash(project_name.items),
     };
 
-    const project_dir = try std.fs.cwd().openDir(pname.?, .{});
-    try project_dir.makeDir("src");
+    const project_dir = try std.Io.Dir.cwd().openDir(io, pname.?, .{});
+    try project_dir.createDir(io, "src", .default_file);
 
-    try writeFile(project_dir, "build.zig", build_zig, .{project_name.items});
-    try writeFile(project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version });
-    try writeFile(project_dir, "src/main.zig", main_zig, .{});
+    try writeFile(io, project_dir, "build.zig", build_zig, .{project_name.items});
+    try writeFile(io, project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version });
+    try writeFile(io, project_dir, "src/main.zig", main_zig, .{});
     if (is_flake_package) {
-        try writeFile(project_dir, "flake.nix", flake_package, .{zig_version});
+        try writeFile(io, project_dir, "flake.nix", flake_package, .{zig_version});
     } else {
-        try writeFile(project_dir, "flake.nix", flake, .{zig_version});
+        try writeFile(io, project_dir, "flake.nix", flake, .{zig_version});
     }
-    try writeFile(project_dir, ".envrc", envrc, .{});
-    try writeFile(project_dir, ".gitignore", gitignore, .{});
+    try writeFile(io, project_dir, ".envrc", envrc, .{});
+    try writeFile(io, project_dir, ".gitignore", gitignore, .{});
 }
 
-fn writeFile(dir: std.fs.Dir, filename: []const u8, comptime content: []const u8, args: anytype) !void {
-    const file = try dir.createFile(filename, .{ .truncate = false });
-    defer file.close();
+fn writeFile(io: std.Io, dir: std.Io.Dir, filename: []const u8, comptime content: []const u8, args: anytype) !void {
+    const file = try dir.createFile(io, filename, .{ .truncate = false });
+    defer file.close(io);
 
     var file_buffer: [1024]u8 = undefined;
-    var file_writer = file.writer(&file_buffer);
+    var file_writer = file.writer(io, &file_buffer);
     const writer = &file_writer.interface;
 
     try writer.print(content, args);
@@ -253,12 +246,12 @@ const flake_package =
     \\        fs = lib.fileset;
     \\        pkgs = import nixpkgs {{ inherit system; }};
     \\        version = "0.1.0";
-    \\        zigPkg = zig.packages.${{system}}."{f}";
+    \\        zigpkg = zig.packages.${{system}}."{f}";
     \\      in
     \\      {{
     \\        devShells.default = pkgs.mkShell {{
     \\          nativeBuildInputs = [
-    \\            zigPkg
+    \\            zigpkg
     \\            zls.packages.${{system}}.zls
     \\          ];
     \\        }};
@@ -278,7 +271,7 @@ const flake_package =
     \\          }};
     \\
     \\          strictDeps = true;
-    \\          nativeBuildInputs = [ zigPkg ];
+    \\          nativeBuildInputs = [ zigpkg ];
     \\
     \\          zigBuildFlags = [
     \\            "-Doptimize=ReleaseSafe"
@@ -305,5 +298,6 @@ const envrc =
 const gitignore =
     \\.zig-cache
     \\zig-out
+    \\zig-pkg
     \\
 ;
