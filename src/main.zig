@@ -125,6 +125,16 @@ pub fn main(init: std.process.Init) !void {
     }
     try writeFile(io, project_dir, ".envrc", envrc, .{});
     try writeFile(io, project_dir, ".gitignore", gitignore, .{});
+
+    _ = try std.process.run(allocator, io, .{
+        .argv = &.{ "git", "init" },
+        .cwd = .{ .dir = project_dir },
+    });
+
+    _ = try std.process.run(allocator, io, .{
+        .argv = &.{ "git", "add", "." },
+        .cwd = .{ .dir = project_dir },
+    });
 }
 
 fn writeFile(io: std.Io, dir: std.Io.Dir, filename: []const u8, comptime content: []const u8, args: anytype) !void {
