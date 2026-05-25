@@ -9,13 +9,18 @@ const Fingerprint = packed struct(u64) {
     }
 };
 
+const ZigVersion = union(enum) {
+    semver: std.SemanticVersion,
+    nightly,
+};
+
 const usage =
     \\usage: ziginit [options] <project name>
     \\
     \\options:
     \\  -h, --help                 print help text
     \\  --flake-package            initialize the flake as a package also
-    \\  --zig-version=[version]    set the zig compiler version
+    \\  --zig-version=[version]    set the zig compiler version (also accepts nightly)
     \\
 ;
 
@@ -34,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     const args = (try init.minimal.args.toSlice(allocator))[1..];
 
     var pname: ?[]const u8 = null;
-    var zig_version: std.SemanticVersion = .{ .major = 0, .minor = 15, .patch = 2 };
+    var zig_version: ZigVersion = .nightly;
     var is_flake_package = false;
 
     for (args) |arg| {
@@ -46,7 +51,10 @@ pub fn main(init: std.process.Init) !void {
             } else if (std.mem.eql(u8, arg, "--flake-package")) {
                 is_flake_package = true;
             } else if (std.mem.cutPrefix(u8, arg, "--zig-version=")) |version| {
-                zig_version = try .parse(version);
+                if (std.mem.eql(u8, version, "nightly"))
+                    zig_version = .nightly
+                else
+                    zig_version = .{ .semver = try .parse(version) };
             } else {
                 fatal(error.InvalidOption);
             }
@@ -57,6 +65,18 @@ pub fn main(init: std.process.Init) !void {
             pname = arg;
         }
     }
+
+    const nix_zig_version: []const u8 = blk: {
+        break :blk switch (zig_version) {
+            .nightly => "nightly",
+            .semver => |version| try std.fmt.allocPrint(allocator, "zig_{d}_{d}_{d}", .{ version.major, version.minor, version.patch }),
+        };
+    };
+
+    const zig_version_str: []const u8 = switch (zig_version) {
+        .nightly => try fetchNightyVersion(allocator, io),
+        .semver => |version| try std.fmt.allocPrint(allocator, "{f}", .{version}),
+    };
 
     var project_name: std.ArrayList(u8) = .empty;
     if (pname) |name|
@@ -71,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
     while (i < project_name.items.len) {
         project_name.items[i] = std.ascii.toLower(project_name.items[i]);
         if (!std.ascii.isAlphanumeric(project_name.items[i]) and project_name.items[i] != '_') {
-            _ = project_name.swapRemove(i);
+            _ = project_name.orderedRemove(i);
             continue;
         }
 
@@ -82,7 +102,7 @@ pub fn main(init: std.process.Init) !void {
         try project_name.insert(allocator, 0, '_');
     }
 
-    try std.Io.Dir.cwd().createDir(io, pname.?, .default_file);
+    try std.Io.Dir.cwd().createDir(io, pname.?, .default_dir);
 
     const rng_impl: std.Random.IoSource = .{ .io = io };
     const rng = rng_impl.interface();
@@ -93,15 +113,15 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const project_dir = try std.Io.Dir.cwd().openDir(io, pname.?, .{});
-    try project_dir.createDir(io, "src", .default_file);
+    try project_dir.createDir(io, "src", .default_dir);
 
     try writeFile(io, project_dir, "build.zig", build_zig, .{project_name.items});
-    try writeFile(io, project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version });
+    try writeFile(io, project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version_str });
     try writeFile(io, project_dir, "src/main.zig", main_zig, .{});
     if (is_flake_package) {
-        try writeFile(io, project_dir, "flake.nix", flake_package, .{ zig_version, project_name.items });
+        try writeFile(io, project_dir, "flake.nix", flake_package, .{ nix_zig_version, project_name.items });
     } else {
-        try writeFile(io, project_dir, "flake.nix", flake, .{zig_version});
+        try writeFile(io, project_dir, "flake.nix", flake, .{nix_zig_version});
     }
     try writeFile(io, project_dir, ".envrc", envrc, .{});
     try writeFile(io, project_dir, ".gitignore", gitignore, .{});
@@ -117,6 +137,29 @@ fn writeFile(io: std.Io, dir: std.Io.Dir, filename: []const u8, comptime content
 
     try writer.print(content, args);
     try writer.flush();
+}
+
+fn fetchNightyVersion(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
+    defer client.deinit();
+
+    var body_writer: std.Io.Writer.Allocating = .init(allocator);
+    defer body_writer.deinit();
+
+    const response = try client.fetch(.{
+        .location = .{ .url = "https://ziglang.org/download/index.json" },
+        .response_writer = &body_writer.writer,
+    });
+
+    if (response.status != .ok) return error.InvalidResponse;
+
+    const json = try std.json.parseFromSlice(std.json.Value, allocator, body_writer.written(), .{});
+    defer json.deinit();
+
+    const master = json.value.object.get("master") orelse return error.NoMasterField;
+    const version = master.object.get("version") orelse return error.NoVersionField;
+
+    return try allocator.dupe(u8, version.string);
 }
 
 const build_zig =
@@ -156,7 +199,7 @@ const build_zig_zon =
     \\    .name = .{s},
     \\    .version = "0.1.0",
     \\    .fingerprint = 0x{x},
-    \\    .minimum_zig_version = "{f}",
+    \\    .minimum_zig_version = "{s}",
     \\    .dependencies = .{{}},
     \\    .paths = .{{
     \\        "build.zig",
@@ -177,39 +220,42 @@ const main_zig =
 ;
 
 const flake =
-    \\
     \\{{
     \\  description = "zig flake";
     \\
     \\  inputs = {{
     \\    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    \\    flake-utils.url = "github:numtide/flake-utils";
     \\
-    \\    zig = {{
-    \\      url = "github:mitchellh/zig-overlay";
-    \\      inputs.nixpkgs.follows = "nixpkgs";
-    \\    }};
-    \\
-    \\    zls = {{
-    \\      url = "github:zigtools/zls";
-    \\      inputs.nixpkgs.follows = "nixpkgs";
-    \\    }};
+    \\    zig-flake.url = "github:silversquirl/zig-flake";
+    \\    zig-flake.inputs.nixpkgs.follows = "nixpkgs";
     \\  }};
     \\
-    \\  outputs = {{ self, nixpkgs, zig, zls, flake-utils }}:
-    \\    flake-utils.lib.eachDefaultSystem (system:
-    \\      let
-    \\        pkgs = import nixpkgs {{ inherit system; }};
-    \\      in {{
-    \\        devShells.default = pkgs.mkShell {{
-    \\          nativeBuildInputs = [
-    \\            zig.packages.${{system}}."{f}"
-    \\            zls.packages.${{system}}.zls
-    \\          ];
-    \\        }};
-    \\      }});
+    \\  outputs =
+    \\    {{
+    \\      self,
+    \\      nixpkgs,
+    \\      zig-flake,
+    \\    }}:
+    \\    let
+    \\      forAllSystems =
+    \\        f:
+    \\        builtins.mapAttrs (
+    \\          system: pkgs: f pkgs zig-flake.packages.${{system}}.{s}
+    \\        ) nixpkgs.legacyPackages;
+    \\    in
+    \\    {{
+    \\      devShells = forAllSystems (
+    \\        pkgs: zig: {{
+    \\          default = pkgs.mkShellNoCC {{
+    \\            nativeBuildInputs = [
+    \\              zig
+    \\              zig.zls
+    \\            ];
+    \\          }};
+    \\        }}
+    \\      );
+    \\    }};
     \\}}
-    \\
 ;
 
 const flake_package =
@@ -218,76 +264,90 @@ const flake_package =
     \\
     \\  inputs = {{
     \\    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    \\    flake-utils.url = "github:numtide/flake-utils";
     \\
-    \\    zig = {{
-    \\      url = "github:mitchellh/zig-overlay";
-    \\      inputs.nixpkgs.follows = "nixpkgs";
-    \\    }};
-    \\
-    \\    zls = {{
-    \\      url = "github:zigtools/zls";
-    \\      inputs.nixpkgs.follows = "nixpkgs";
-    \\    }};
+    \\    zig-flake.url = "github:silversquirl/zig-flake";
+    \\    zig-flake.inputs.nixpkgs.follows = "nixpkgs";
     \\  }};
     \\
     \\  outputs =
     \\    {{
     \\      self,
     \\      nixpkgs,
-    \\      zig,
-    \\      zls,
-    \\      flake-utils,
+    \\      zig-flake,
     \\    }}:
-    \\    flake-utils.lib.eachDefaultSystem (
-    \\      system:
-    \\      let
-    \\        lib = nixpkgs.lib;
-    \\        fs = lib.fileset;
-    \\        pkgs = import nixpkgs {{ inherit system; }};
-    \\        version = "0.1.0";
-    \\        zigpkg = zig.packages.${{system}}."{f}";
-    \\      in
-    \\      {{
-    \\        devShells.default = pkgs.mkShell {{
-    \\          nativeBuildInputs = [
-    \\            zigpkg
-    \\            zls.packages.${{system}}.zls
-    \\          ];
-    \\        }};
-    \\
-    \\        packages.default = pkgs.stdenvNoCC.mkDerivation {{
-    \\          pname = "{s}";
-    \\          version = version;
-    \\          src = fs.toSource {{
-    \\            root = ./.;
-    \\            fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource ./.)) (
-    \\              fs.unions [
-    \\                ./src
-    \\                ./build.zig
-    \\                ./build.zig.zon
-    \\              ]
-    \\            );
+    \\    let
+    \\      lib = nixpkgs.lib;
+    \\      fs = lib.fileset;
+    \\      forAllSystems =
+    \\        f:
+    \\        builtins.mapAttrs (
+    \\          system: pkgs: f system pkgs zig-flake.packages.${{system}}.{s}
+    \\        ) nixpkgs.legacyPackages;
+    \\    in
+    \\    {{
+    \\      devShells = forAllSystems (
+    \\        system: pkgs: zig: {{
+    \\          default = pkgs.mkShellNoCC {{
+    \\            nativeBuildInputs = [
+    \\              zig
+    \\              zig.zls
+    \\            ];
     \\          }};
+    \\        }}
+    \\      );
     \\
-    \\          strictDeps = true;
-    \\          nativeBuildInputs = [ zigpkg ];
+    \\      packages = forAllSystems (
+    \\        system: pkgs: zig: {{
+    \\          default = pkgs.stdenvNoCC.mkDerivation {{
+    \\            name = "{s}";
+    \\            version = "0.1.0";
+    \\            src = fs.toSource {{
+    \\              root = ./.;
+    \\              fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource ./.)) (
+    \\                fs.unions [
+    \\                  ./src
+    \\                  ./build.zig
+    \\                  ./build.zig.zon
+    \\                  ./deps.nix
+    \\                ]
+    \\              );
+    \\            }};
     \\
-    \\          zigBuildFlags = [
-    \\            "-Doptimize=ReleaseSafe"
-    \\          ];
+    \\            nativeBuildInputs = [ zig ];
+    \\            dontInstall = true;
+    \\            strictDeps = true;
     \\
-    \\          configurePhase = ''
-    \\            export ZIG_GLOBAL_CACHE_DIR=$TEMP/.cache
-    \\          '';
+    \\            configurePhase = ''
+    \\              export ZIG_GLOBAL_CACHE_DIR=$TEMP/.cache
+    \\              PACKAGE_DIR=${{pkgs.callPackage ./deps.nix {{ }}}}
+    \\            '';
     \\
-    \\          buildPhase = ''
-    \\            zig build install --color off --prefix $out
-    \\          '';
-    \\        }};
-    \\      }}
-    \\    );
+    \\            buildPhase = ''
+    \\              zig build install --system $PACKAGE_DIR -Doptimize=ReleaseSafe --color off --prefix $out
+    \\            '';
+    \\          }};
+    \\        }}
+    \\      );
+    \\    }};
     \\}}
+;
+
+const deps =
+    \\{{
+    \\  linkFarm,
+    \\  fetchzip,
+    \\  fetchgit,
+    \\}}:
+    \\linkFarm "zig-packages" [
+    \\  {{
+    \\#   name = "mksv-0.0.1-SesxeIg4AAAxnAqrX4eSfBB-mFjYmbWpbgdfOWOZ2UU_";
+    \\#   path = fetchgit {
+    \\#     url = "https://codeberg.org/mikastiv/mksv.git";
+    \\#     rev = "30c8d2fc97ba3d09764a3990b4f1516768fa6927";
+    \\#     hash = "sha256-ThaqFunjhGmi3XrJnF299GSGgfUAfyeXnPda8OLc9JU=";
+    \\#   };
+    \\  }}
+    \\]
 ;
 
 const envrc =
