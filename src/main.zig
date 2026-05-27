@@ -119,7 +119,7 @@ pub fn main(init: std.process.Init) !void {
     try writeFile(io, project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version_str });
     try writeFile(io, project_dir, "src/main.zig", main_zig, .{});
     if (is_flake_package) {
-        try writeFile(io, project_dir, "flake.nix", flake_package, .{ nix_zig_version, project_name.items });
+        try writeFile(io, project_dir, "flake.nix", flake_package, .{ nix_zig_version, project_name.items, project_name.items });
     } else {
         try writeFile(io, project_dir, "flake.nix", flake, .{nix_zig_version});
     }
@@ -311,6 +311,7 @@ const flake_package =
     \\          default = pkgs.stdenvNoCC.mkDerivation {{
     \\            name = "{s}";
     \\            version = "0.1.0";
+    \\            meta.mainProgram = "{s}";
     \\            src = fs.toSource {{
     \\              root = ./.;
     \\              fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource ./.)) (
