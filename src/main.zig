@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     const args = (try init.minimal.args.toSlice(allocator))[1..];
 
     var pname: ?[]const u8 = null;
-    var zig_version: ZigVersion = .nightly;
+    var zig_version: ZigVersion = .{ .semver = .{ .major = 0, .minor = 16, .patch = 0 } };
     var is_flake_package = false;
 
     for (args) |arg| {
