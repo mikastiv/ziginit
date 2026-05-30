@@ -20,6 +20,7 @@ const usage =
     \\options:
     \\  -h, --help                 print help text
     \\  --flake-package            initialize the flake as a package also
+    \\  --no-cc                    use the NoCC nix environment
     \\  --zig-version=[version]    set the zig compiler version (also accepts nightly)
     \\
 ;
@@ -41,6 +42,7 @@ pub fn main(init: std.process.Init) !void {
     var pname: ?[]const u8 = null;
     var zig_version: ZigVersion = .{ .semver = .{ .major = 0, .minor = 16, .patch = 0 } };
     var is_flake_package = false;
+    var no_cc = false;
 
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "-")) {
@@ -50,6 +52,8 @@ pub fn main(init: std.process.Init) !void {
                 return;
             } else if (std.mem.eql(u8, arg, "--flake-package")) {
                 is_flake_package = true;
+            } else if (std.mem.eql(u8, arg, "--no-cc")) {
+                no_cc = true;
             } else if (std.mem.cutPrefix(u8, arg, "--zig-version=")) |version| {
                 if (std.mem.eql(u8, version, "nightly"))
                     zig_version = .nightly
@@ -115,13 +119,16 @@ pub fn main(init: std.process.Init) !void {
     const project_dir = try std.Io.Dir.cwd().openDir(io, pname.?, .{});
     try project_dir.createDir(io, "src", .default_dir);
 
+    const no_cc_str: []const u8 = if (no_cc) "NoCC" else "";
+
     try writeFile(io, project_dir, "build.zig", build_zig, .{project_name.items});
     try writeFile(io, project_dir, "build.zig.zon", build_zig_zon, .{ project_name.items, fingerprint.int(), zig_version_str });
     try writeFile(io, project_dir, "src/main.zig", main_zig, .{});
     if (is_flake_package) {
-        try writeFile(io, project_dir, "flake.nix", flake_package, .{ nix_zig_version, project_name.items, project_name.items });
+        try writeFile(io, project_dir, "flake.nix", flake_package, .{ nix_zig_version, no_cc_str, no_cc_str, project_name.items, project_name.items });
+        try writeFile(io, project_dir, "deps.nix", deps, .{});
     } else {
-        try writeFile(io, project_dir, "flake.nix", flake, .{nix_zig_version});
+        try writeFile(io, project_dir, "flake.nix", flake, .{ nix_zig_version, no_cc_str });
     }
     try writeFile(io, project_dir, ".envrc", envrc, .{});
     try writeFile(io, project_dir, ".gitignore", gitignore, .{});
@@ -256,7 +263,7 @@ const flake =
     \\    {{
     \\      devShells = forAllSystems (
     \\        pkgs: zig: {{
-    \\          default = pkgs.mkShellNoCC {{
+    \\          default = pkgs.mkShell{s} {{
     \\            nativeBuildInputs = [
     \\              zig
     \\              zig.zls
@@ -297,7 +304,7 @@ const flake_package =
     \\    {{
     \\      devShells = forAllSystems (
     \\        system: pkgs: zig: {{
-    \\          default = pkgs.mkShellNoCC {{
+    \\          default = pkgs.mkShell{s} {{
     \\            nativeBuildInputs = [
     \\              zig
     \\              zig.zls
@@ -308,7 +315,7 @@ const flake_package =
     \\
     \\      packages = forAllSystems (
     \\        system: pkgs: zig: {{
-    \\          default = pkgs.stdenvNoCC.mkDerivation {{
+    \\          default = pkgs.stdenv{s}.mkDerivation {{
     \\            name = "{s}";
     \\            version = "0.1.0";
     \\            meta.mainProgram = "{s}";
@@ -352,11 +359,18 @@ const deps =
     \\linkFarm "zig-packages" [
     \\  {{
     \\#   name = "mksv-0.0.1-SesxeIg4AAAxnAqrX4eSfBB-mFjYmbWpbgdfOWOZ2UU_";
-    \\#   path = fetchgit {
+    \\#   path = fetchgit {{
     \\#     url = "https://codeberg.org/mikastiv/mksv.git";
     \\#     rev = "30c8d2fc97ba3d09764a3990b4f1516768fa6927";
     \\#     hash = "sha256-ThaqFunjhGmi3XrJnF299GSGgfUAfyeXnPda8OLc9JU=";
-    \\#   };
+    \\#   }};
+    \\# }}
+    \\# {{
+    \\#   name = "mksv-0.0.1-SesxeIg4AAAxnAqrX4eSfBB-mFjYmbWpbgdfOWOZ2UU_";
+    \\#   path = fetchzig {{
+    \\#     url = "https://codeberg.org/mikastiv/mksv/archive/main.zip";
+    \\#     hash = "sha256-ThaqFunjhGmi3XrJnF299GSGgfUAfyeXnPda8OLc9JU=";
+    \\#   }};
     \\  }}
     \\]
 ;
