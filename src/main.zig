@@ -264,6 +264,7 @@ const flake =
     \\      devShells = forAllSystems (
     \\        pkgs: zig: {{
     \\          default = pkgs.mkShell{s} {{
+    \\            buildInputs = [ ];
     \\            nativeBuildInputs = [
     \\              zig
     \\              zig.zls
@@ -305,6 +306,7 @@ const flake_package =
     \\      devShells = forAllSystems (
     \\        system: pkgs: zig: {{
     \\          default = pkgs.mkShell{s} {{
+    \\            buildInputs = [ ];
     \\            nativeBuildInputs = [
     \\              zig
     \\              zig.zls
@@ -331,6 +333,7 @@ const flake_package =
     \\              );
     \\            }};
     \\
+    \\            buildInputs = [ ];
     \\            nativeBuildInputs = [ zig ];
     \\            dontInstall = true;
     \\            strictDeps = true;

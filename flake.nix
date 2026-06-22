@@ -27,6 +27,7 @@
       devShells = forAllSystems (
         system: pkgs: zig: {
           default = pkgs.mkShellNoCC {
+            buildInputs = [ ];
             nativeBuildInputs = [
               zig
               zig.zls
@@ -52,6 +53,7 @@
               );
             };
 
+            buildInput = [ ];
             nativeBuildInputs = [ zig ];
             dontInstall = true;
             strictDeps = true;
