@@ -318,7 +318,7 @@ const flake_package =
     \\      packages = forAllSystems (
     \\        system: pkgs: zig: {{
     \\          default = pkgs.stdenv{s}.mkDerivation {{
-    \\            name = "{s}";
+    \\            pname = "{s}";
     \\            version = "0.1.0";
     \\            meta.mainProgram = "{s}";
     \\            src = fs.toSource {{

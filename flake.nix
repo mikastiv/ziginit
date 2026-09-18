@@ -39,7 +39,7 @@
       packages = forAllSystems (
         system: pkgs: zig: {
           default = pkgs.stdenvNoCC.mkDerivation {
-            name = "ziginit";
+            pname = "ziginit";
             version = "0.1.0";
             meta.mainProgram = "ziginit";
             src = fs.toSource {
@@ -53,7 +53,7 @@
               );
             };
 
-            buildInput = [ ];
+            buildInputs = [ ];
             nativeBuildInputs = [ zig ];
             dontInstall = true;
             strictDeps = true;
